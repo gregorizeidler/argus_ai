@@ -1,0 +1,504 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum UserRole {
+  ADMIN
+  SENIOR_AUDITOR
+  AUDITOR
+  REVIEWER
+  READONLY
+}
+
+enum AuditPhase {
+  planning
+  fieldwork
+  testing
+  reporting
+  completed
+}
+
+enum Rating {
+  effective
+  largely_effective
+  partially_effective
+  ineffective
+  not_assessed
+}
+
+enum TestResult {
+  pass
+  fail
+  partial
+  not_tested
+  not_applicable
+}
+
+enum EvidenceType {
+  policy
+  procedure
+  report
+  system_screenshot
+  sample
+  training_material
+  meeting_minutes
+  correspondence
+  data_extract
+  other
+}
+
+enum EvidenceStatus {
+  requested
+  received
+  under_review
+  accepted
+  rejected
+  pending_clarification
+}
+
+enum EvidencePriority {
+  high
+  medium
+  low
+}
+
+enum Severity {
+  critical
+  high
+  medium
+  low
+}
+
+enum FindingStatus {
+  draft
+  confirmed
+  management_response
+  closed
+}
+
+enum ManagementAgreement {
+  agree
+  partially_agree
+  disagree
+}
+
+enum RootCauseCategory {
+  people
+  process
+  technology
+  governance
+}
+
+enum SampleStatus {
+  selected
+  testing
+  tested
+  exception_found
+}
+
+enum SelectionMethod {
+  random
+  stratified
+  judgmental
+  monetary_unit
+}
+
+enum MessageRole {
+  system
+  assistant
+  user
+}
+
+enum TestType {
+  design
+  operating
+  both
+}
+
+enum MilestoneStatus {
+  pending
+  in_progress
+  completed
+  delayed
+}
+
+enum MemoStatus {
+  draft
+  reviewed
+  final
+}
+
+// ============================================================
+// Models
+// ============================================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(AUDITOR)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  audits    Audit[]
+  auditLogs AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Audit {
+  id              String     @id @default(cuid())
+  name            String
+  institution     String
+  scope           String
+  planning        String?
+  phase           AuditPhase @default(planning)
+  overallProgress Float      @default(0)
+  overallRating   Rating     @default(not_assessed)
+  reportContent   String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  pillars       Pillar[]
+  evidence      Evidence[]
+  findings      Finding[]
+  samples       Sample[]
+  conversations AuditConversation[]
+  interviews    Interview[]
+  milestones    AuditMilestone[]
+  pillarMemos   PillarMemo[]
+  riskMatrix    RiskMatrixItem[]
+  datasets      ImportedDataset[]
+  auditLogs     AuditLog[]
+
+  @@index([createdById])
+  @@index([phase])
+  @@index([createdAt])
+}
+
+model Pillar {
+  id               String @id @default(cuid())
+  number           Int
+  code             String
+  name             String
+  description      String
+  icon             String
+  regulatoryBasis  String
+  overallRating    Rating @default(not_assessed)
+  weight           Float  @default(1)
+  completionPercent Float @default(0)
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  subAreas SubArea[]
+
+  @@unique([auditId, code])
+  @@index([auditId])
+}
+
+model SubArea {
+  id              String @id @default(cuid())
+  code            String
+  name            String
+  description     String
+  regulatoryBasis String
+  rating          Rating @default(not_assessed)
+  keyRisks        String
+
+  pillarId String
+  pillar   Pillar @relation(fields: [pillarId], references: [id], onDelete: Cascade)
+
+  testProcedures TestProcedure[]
+
+  @@unique([pillarId, code])
+  @@index([pillarId])
+}
+
+model TestProcedure {
+  id              String     @id @default(cuid())
+  code            String
+  description     String
+  methodology     String
+  sampleSize      String?
+  regulatoryBasis String
+  result          TestResult @default(not_tested)
+  observations    String     @default("")
+  workpaperNotes  String?
+  scope           String?
+  conclusion      String?
+  testedAt        DateTime?
+  testType        TestType?
+
+  subAreaId String
+  subArea   SubArea @relation(fields: [subAreaId], references: [id], onDelete: Cascade)
+
+  evidence EvidenceOnTestProcedure[]
+
+  @@unique([subAreaId, code])
+  @@index([subAreaId])
+  @@index([result])
+}
+
+model Evidence {
+  id          String         @id @default(cuid())
+  pillarId    String
+  subAreaId   String?
+  name        String
+  description String
+  type        EvidenceType
+  status      EvidenceStatus @default(requested)
+  fileName    String?
+  fileSize    Int?
+  uploadedAt  DateTime?
+  reviewedAt  DateTime?
+  reviewNotes String?
+  requestedAt DateTime       @default(now())
+  dueDate     DateTime?
+  priority    EvidencePriority?
+  aiAnalysis  String?
+  uploadPath  String?
+  textPreview String?
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  testProcedures EvidenceOnTestProcedure[]
+
+  @@index([auditId])
+  @@index([pillarId])
+  @@index([status])
+}
+
+model EvidenceOnTestProcedure {
+  evidenceId      String
+  testProcedureId String
+
+  evidence      Evidence      @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  testProcedure TestProcedure @relation(fields: [testProcedureId], references: [id], onDelete: Cascade)
+
+  @@id([evidenceId, testProcedureId])
+  @@index([evidenceId])
+  @@index([testProcedureId])
+}
+
+model Finding {
+  id                        String              @id @default(cuid())
+  pillarId                  String
+  subAreaId                 String?
+  title                     String
+  severity                  Severity
+  status                    FindingStatus       @default(draft)
+  condition                 String
+  criteria                  String
+  cause                     String
+  effect                    String
+  recommendation            String
+  managementResponse        String?
+  managementAgreement       ManagementAgreement?
+  repeatFindingId           String?
+  rootCauseCategory         RootCauseCategory?
+  remediationValidated      Boolean             @default(false)
+  remediationValidationDate DateTime?
+  remediationValidationNotes String?
+  actionPlan                String?
+  regulatoryReference       String
+  isAiGenerated             Boolean             @default(false)
+  createdAt                 DateTime            @default(now())
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  riskMatrixItems RiskMatrixItem[]
+
+  @@index([auditId])
+  @@index([pillarId])
+  @@index([severity])
+  @@index([status])
+}
+
+model Sample {
+  id              String          @id @default(cuid())
+  pillarId        String
+  subAreaId       String
+  testProcedureId String
+  description     String
+  population      String
+  populationSize  Int
+  sampleSize      Int
+  selectionMethod SelectionMethod
+  items           String
+  status          SampleStatus    @default(selected)
+  exceptionRate   Float?
+  conclusion      String?
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([pillarId])
+  @@index([testProcedureId])
+}
+
+model ChatMessage {
+  id          String      @id @default(cuid())
+  role        MessageRole
+  content     String
+  timestamp   DateTime    @default(now())
+  pillarId    String?
+  attachments String?
+  metadata    String?
+
+  auditId        String
+  conversationId String
+  conversation   AuditConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([auditId])
+  @@index([timestamp])
+}
+
+model AuditConversation {
+  id           String   @id @default(cuid())
+  pillarId     String
+  lastActivity DateTime @default(now())
+
+  auditId  String
+  audit    Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  messages ChatMessage[]
+
+  @@index([auditId])
+  @@index([pillarId])
+}
+
+model Interview {
+  id          String   @id @default(cuid())
+  pillarId    String
+  subAreaId   String?
+  interviewee String
+  role        String
+  date        DateTime
+  location    String?
+  questions   String
+  summary     String
+  conclusions String
+  createdAt   DateTime @default(now())
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([pillarId])
+}
+
+model AuditMilestone {
+  id            String          @id @default(cuid())
+  phase         AuditPhase
+  name          String
+  targetDate    DateTime
+  completedDate DateTime?
+  status        MilestoneStatus @default(pending)
+  notes         String?
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([phase])
+}
+
+model PillarMemo {
+  id                      String      @id @default(cuid())
+  pillarId                String
+  scopeTested             String
+  evidenceSummary         String
+  testingSummary          String
+  findingsSummary         String
+  ratingJustification     String
+  conclusion              String
+  generatedAt             DateTime    @default(now())
+  isAiGenerated           Boolean     @default(false)
+  preparedBy              String?
+  reviewedBy              String?
+  preparedAt              DateTime?
+  reviewedAt              DateTime?
+  status                  MemoStatus  @default(draft)
+  scopeLimitations        String?
+  unresolvedMatters       String?
+  managementActionSummary String?
+  isa610Reliance          String?
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([pillarId])
+}
+
+model RiskMatrixItem {
+  id         String @id @default(cuid())
+  findingId  String
+  likelihood Int
+  impact     Int
+
+  auditId String
+  audit   Audit   @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([findingId])
+}
+
+model ImportedDataset {
+  id         String   @id @default(cuid())
+  name       String
+  pillarId   String
+  headers    String
+  rows       String
+  totalRows  Int
+  source     String
+  importedAt DateTime @default(now())
+
+  auditId String
+  audit   Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([pillarId])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  auditId       String?
+  action        String
+  entityType    String?
+  entityId      String?
+  previousValue String?
+  newValue      String?
+  ipAddress     String?
+  timestamp     DateTime @default(now())
+
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  audit Audit? @relation(fields: [auditId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([auditId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([entityType, entityId])
+}
